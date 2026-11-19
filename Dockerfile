@@ -7,7 +7,8 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 # Copie du code source
-COPY src ./src
+COPY api/src ./src
+
 
 # Métadonnées injectées au build (aucun secret)
 ARG APP_VERSION=v0.1.0
