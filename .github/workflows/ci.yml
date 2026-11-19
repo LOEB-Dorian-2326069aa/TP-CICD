@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, preprod]
+  push:
+    branches: [main, preprod]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20.x'
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Preparation .env de test
+        working-directory: api
+        run: |
+          cat <<EOF > .env
+          DB_USER=test_user
+          DB_PASSWORD=test_password
+          DB_NAME=test_db
+          APP_VERSION=0.1.0-test
+          EOF
+
+      - name: Tests
+        working-directory: api
+        run: npm test
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Construction de l'image Docker
+        working-directory: api
+        run: docker build -t producteurs-api:${{ github.sha }} ./api
+
+        # test pipeline local avec https://github.com/nektos/act
