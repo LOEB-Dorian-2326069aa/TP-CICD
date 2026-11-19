@@ -41,6 +41,33 @@ app.get('/products', async (req, res) => {
   }
 });
 
+// Route PATCH /products/:id/stock : permet au producteur de déclarer/mettre à jour le stock
+app.patch('/products/:id/stock', async (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const { stock } = req.body;
+
+  if (Number.isNaN(productId) || typeof stock !== 'number' || !Number.isInteger(stock) || stock < 0) {
+    return res.status(400).json({
+      error: 'Le stock doit être un entier positif ou nul (>= 0).',
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE products SET stock = $1 WHERE id = $2 RETURNING id, name, category, price, stock',
+      [stock, productId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: `Produit #${productId} introuvable.` });
+    }
+
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    return res.status(500).json({ error: 'Erreur lors de la mise à jour du stock.' });
+  }
+});
+
 // Route POST /orders : enregistre une commande (la gestion du stock sera affinée en Partie 2)
 app.post('/orders', async (req, res) => {
   const { product_id, quantity, customer_name } = req.body;
