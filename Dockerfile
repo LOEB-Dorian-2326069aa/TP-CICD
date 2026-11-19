@@ -7,7 +7,7 @@ COPY package*.json ./
 RUN npm install --omit=dev
 
 # Copie du code source
-COPY api/src ./src
+COPY api/src ./api/src
 
 
 # Métadonnées injectées au build (aucun secret)
