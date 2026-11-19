@@ -2,6 +2,8 @@
 
 ## Carte contexte
 
+Sujet D : 
+
 Équipe distribuée de **4 personnes** (Montagne, Antilles, Brest), avec **décalage horaire**, **réseau instable à la montagne** et **1 h commune maximum par jour**.
 
 **Objectif :** fournir une API REST fiable pour relier producteurs, restaurants et particuliers, avec PostgreSQL, Docker Compose et GitHub Actions.
