@@ -1,0 +1,17 @@
+# Secrets et variables d'environnement locales
+.env
+.env.*
+!.env.example
+
+# Dépendances & builds
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+dist/
+
+# Système & IDE
+.DS_Store
+.vscode/
+.idea/
