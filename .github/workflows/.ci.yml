@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   pull_request:
@@ -6,7 +6,12 @@ on:
   push:
     branches: [main, preprod]
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/api
+
 jobs:
+  # 1 : Validation unitaire / API avec environnement de test (.env généré à la volée)
   test:
     runs-on: ubuntu-latest
     steps:
@@ -17,25 +22,76 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '20.x'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
 
+      # Génère un .env temporaire uniquement pour les tests (non versionné, détruit avec le runner)
       - name: Preparation .env de test
         run: |
-                node -e "const fs = require('fs'); fs.writeFileSync('.env', ['DB_USER=test_user', 'DB_PASSWORD=test_password', 'DB_NAME=test_db', 'APP_VERSION=0.1.0-test', ''].join('\n'));"
+          node -e "const fs = require('fs'); fs.writeFileSync('.env', ['DB_USER=test_user', 'DB_PASSWORD=test_password', 'DB_NAME=test_db', 'APP_VERSION=0.1.0-test', ''].join('\n'));"
 
       - name: Tests
         run: npm test
 
-  build:
+  build-and-push:
     runs-on: ubuntu-latest
     needs: test
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+      - name: Tag image
+        id: meta
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          [ "${{ github.ref }}" = "refs/tags/$TAG" ] || TAG="${GITHUB_REF_NAME}-$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "img=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TAG" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.img }}
+          build-args: APP_VERSION=${{ steps.meta.outputs.tag }}
 
-      - name: Construction de l'image Docker
-        run: docker build -f Dockerfile -t producteurs-api:${{ github.sha }} .
+  deploy-and-health:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Déployer & vérifier /health
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          [ "${{ github.ref }}" = "refs/tags/$TAG" ] || TAG="${GITHUB_REF_NAME}-$(git rev-parse --short HEAD)"
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TAG"
 
-        # test pipeline local avec https://github.com/nektos/act
+          docker network create app_net || true
+          docker run -d --name sim_db --network app_net -e POSTGRES_USER=app_user -e POSTGRES_PASSWORD=sim_password -e POSTGRES_DB=producteurs_db -v "$(pwd)/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro" postgres:16-alpine
+          for i in $(seq 1 30); do docker exec sim_db pg_isready -U app_user -d producteurs_db >/dev/null 2>&1 && break; sleep 1; done
+
+          docker rm -f sim_api 2>/dev/null || true
+          docker run -d --name sim_api --network app_net -p 3000:3000 -e DB_HOST=sim_db -e DB_PORT=5432 -e DB_USER=app_user -e DB_PASSWORD=sim_password -e DB_NAME=producteurs_db -e APP_VERSION="$TAG" "$IMG"
+
+          for i in $(seq 1 20); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/health || true)" = "200" ] && exit 0
+            sleep 2
+          done
+          docker logs sim_api || true
+          exit 1
+      - if: always()
+        run: docker rm -f sim_api sim_db 2>/dev/null || true; docker network rm app_net 2>/dev/null || true
